@@ -1,4 +1,4 @@
-// commands.js — HACKER MD (all commands from the menu)
+// commands.js — HACKER MD (50 commands)
 import os from 'os'
 import fs from 'fs'
 import path from 'path'
@@ -14,11 +14,7 @@ const VERSION = '1.0.0'
 
 // ───────── settings (in-memory, saved to settings.json when possible) ─────────
 const SETTINGS_FILE = './settings.json'
-export const settings = {
-  prefix: '.', mode: 'public', botName: '', tz: 'Africa/Nairobi', emoji: '😎',
-  autobio: false, autoread: false, autoreact: false, autotype: false, autoviewstatus: false,
-  anticall: false, antidelete: false, antilink: {}, antispam: {}, antisticker: {}, welcome: {}, warns: {}
-}
+export const settings = { prefix: '.', mode: 'public', botName: '', tz: 'Africa/Nairobi' }
 try { Object.assign(settings, JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'))) } catch {}
 const save = () => { try { fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings)) } catch {} }
 const botName = () => settings.botName || BOT_NAME
@@ -31,9 +27,7 @@ const senderOf = m => m.key.participant || m.participant || m.key.remoteJid
 const isOwner = m => m.key.fromMe || senderOf(m).split('@')[0].split(':')[0] === DEV_NUMBER
 const reply = (sock, m, text, extra = {}) => sock.sendMessage(jidOf(m), { text, ...extra }, { quoted: m })
 const rnd = a => a[Math.floor(Math.random() * a.length)]
-const shuffle = a => [...a].sort(() => Math.random() - 0.5)
 const fmtUp = s => `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m ${Math.floor(s % 60)}s`
-const sleep = ms => new Promise(r => setTimeout(r, ms))
 
 const textOf = msg => {
   const x = msg?.message || msg
@@ -41,7 +35,9 @@ const textOf = msg => {
 }
 const quotedOf = m => {
   const c = m.message?.extendedTextMessage?.contextInfo
-  return c?.quotedMessage ? { key: { remoteJid: jidOf(m), id: c.stanzaId, participant: c.participant }, message: c.quotedMessage } : null
+  return c?.quotedMessage
+    ? { key: { remoteJid: jidOf(m), id: c.stanzaId, participant: c.participant }, message: c.quotedMessage }
+    : null
 }
 const inputOf = (m, args) => args.join(' ') || textOf(quotedOf(m))
 const targetOf = (m, args) => {
@@ -78,7 +74,8 @@ const getMedia = async (sock, m) => {
 }
 const ff = (buf, args, ext = 'mp3') => new Promise((resolve, reject) => {
   const id = Date.now() + Math.random().toString(36).slice(2)
-  const i = path.join(os.tmpdir(), id + '.in'), o = path.join(os.tmpdir(), id + '.' + ext)
+  const i = path.join(os.tmpdir(), id + '.in')
+  const o = path.join(os.tmpdir(), id + '.' + ext)
   fs.writeFileSync(i, buf)
   exec(`ffmpeg -y -i "${i}" ${args} "${o}"`, err => {
     try { err ? reject(err) : resolve(fs.readFileSync(o)) } finally { fs.rm(i, () => {}); fs.rm(o, () => {}) }
@@ -100,10 +97,11 @@ const ownerCmd = fn => async (sock, m, args) => {
   return fn(sock, m, args)
 }
 
-// ───────── AI (free keyless service; different models where available) ─────────
+// ───────── AI (free keyless service) ─────────
 const ai = async (prompt, sys, model = 'openai') => {
   const j = await getJSON('https://text.pollinations.ai/openai', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ model, messages: [{ role: 'system', content: sys }, { role: 'user', content: prompt }] })
   })
   return j.choices[0].message.content
@@ -115,200 +113,131 @@ const mkAI = (model, sys = 'You are a helpful assistant. Keep answers concise an
     await reply(sock, m, await ai(q, sys, model))
   }
 
-// ───────── image / logo helpers ─────────
+// ───────── image helpers ─────────
 const sendImg = (sock, m, url, caption = '') => sock.sendMessage(jidOf(m), { image: { url }, caption }, { quoted: m })
-const logo = style => async (sock, m, args) => {
-  const t = args.join(' ')
-  if (!t) return reply(sock, m, 'Usage: give a text for the logo')
-  const p = encodeURIComponent(`${style} text logo that says "${t}", centered, high quality, dark background`)
-  await sendImg(sock, m, `https://image.pollinations.ai/prompt/${p}?width=1024&height=1024&nologo=true`, `${style} logo`)
-}
-const avatarOf = async (sock, m, args) => {
-  const t = targetOf(m, args) || senderOf(m)
-  try { return await sock.profilePictureUrl(t, 'image') } catch { return 'https://i.imgur.com/6VBx3io.png' }
-}
-const overlay = base => async (sock, m, args) => {
-  const url = base + encodeURIComponent(await avatarOf(sock, m, args))
-  const buf = await getBuf(url)
-  await sock.sendMessage(jidOf(m), url.includes('triggered') ? { video: buf, gifPlayback: true } : { image: buf }, { quoted: m })
-}
 const anime = kind => async (sock, m) => {
   const j = await getJSON(`https://api.waifu.pics/sfw/${kind}`)
-  await sock.sendMessage(jidOf(m), j.url.endsWith('.gif') ? { video: { url: j.url }, gifPlayback: true } : { image: { url: j.url } }, { quoted: m })
-}
-
-// ───────── audio effects ─────────
-const fx = filter => async (sock, m) => {
-  const md = await getMedia(sock, m)
-  if (!md) return reply(sock, m, '❌ Reply to an audio/voice note/video')
-  const out = await ff(md.buf, `-vn -af "${filter}"`, 'mp3')
-  await sock.sendMessage(jidOf(m), { audio: out, mimetype: 'audio/mpeg' }, { quoted: m })
-}
-const ptt = async (sock, m) => {
-  const md = await getMedia(sock, m)
-  if (!md) return reply(sock, m, '❌ Reply to an audio/video')
-  const out = await ff(md.buf, '-vn -c:a libopus -b:a 64k', 'ogg')
-  await sock.sendMessage(jidOf(m), { audio: out, mimetype: 'audio/ogg; codecs=opus', ptt: true }, { quoted: m })
-}
-const toMp3 = async (sock, m) => {
-  const md = await getMedia(sock, m)
-  if (!md) return reply(sock, m, '❌ Reply to an audio/video')
-  const out = await ff(md.buf, '-vn -b:a 128k', 'mp3')
-  await sock.sendMessage(jidOf(m), { audio: out, mimetype: 'audio/mpeg' }, { quoted: m })
-}
-
-// ───────── downloaders (need your own API, see DL_API) ─────────
-const dl = (kind, as) => async (sock, m, args) => {
-  const q = args.join(' ')
-  if (!q) return reply(sock, m, `Usage: .${kind} <link or name>`)
-  if (!process.env.DL_API) return reply(sock, m, '⚙️ Set the DL_API env variable to your downloader API base URL first.')
-  const j = await getJSON(`${process.env.DL_API}/${kind}?q=${encodeURIComponent(q)}`)
-  const r = j.result || j
-  if (as === 'list') return reply(sock, m, (r.items || r).slice(0, 15).map((x, i) => `${i + 1}. ${x.title || x}`).join('\n'))
-  const url = r.url || r.download || r.link
-  if (!url) return reply(sock, m, '❌ Nothing found')
-  const cap = r.title || ''
-  const msg = as === 'audio' ? { audio: { url }, mimetype: 'audio/mpeg' }
-    : as === 'doc' ? { document: { url }, fileName: cap || 'file', mimetype: 'application/octet-stream' }
-    : { video: { url }, caption: cap }
-  await sock.sendMessage(jidOf(m), msg, { quoted: m })
+  await sock.sendMessage(
+    jidOf(m),
+    j.url.endsWith('.gif') ? { video: { url: j.url }, gifPlayback: true } : { image: { url: j.url } },
+    { quoted: m }
+  )
 }
 
 // ───────── fun data ─────────
 const EIGHT = ['Yes', 'No', 'Maybe', 'Definitely', 'Ask again later', 'Very doubtful', 'Without a doubt', 'Not likely']
 const TRUTHS = ['What is your biggest fear?', 'Who was your first crush?', 'What is the last lie you told?', 'What is your most embarrassing moment?', 'What secret have you never told anyone?']
 const DARES = ['Send a voice note singing a song', 'Change your status to "I love pineapple pizza" for 1 hour', 'Text your crush "hi"', 'Do 10 pushups and send proof', 'Speak in rhymes for the next 5 messages']
-const WORDS = ['planet', 'garden', 'rocket', 'guitar', 'puzzle', 'jungle', 'castle', 'window', 'silver', 'dragon', 'wizard', 'pirate']
-const W5 = ['crane', 'slate', 'house', 'media', 'stone', 'plant', 'light', 'water', 'happy', 'bread', 'smile', 'chair', 'night', 'brave', 'cloud']
 
 // per-chat game state
-const G = { hang: new Map(), num: new Map(), ttt: new Map(), snake: new Map(), mem: new Map(), trivia: new Map(), wordle: new Map() }
+const GUESS = new Map()
 
-const TTT_LINES = [[0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 3, 6], [1, 4, 7], [2, 5, 8], [0, 4, 8], [2, 4, 6]]
-const tttWin = (b, p) => TTT_LINES.some(l => l.every(i => b[i] === p))
-const tttShow = b => [0, 3, 6].map(r => b.slice(r, r + 3).map((c, i) => c || ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣'][r + i]).join('')).join('\n')
-const tttBot = b => {
-  const free = b.map((c, i) => c ? -1 : i).filter(i => i >= 0)
-  for (const p of ['⭕', '❌']) for (const i of free) { const t = [...b]; t[i] = p; if (tttWin(t, p)) return i }
-  return b[4] ? rnd(free) : 4
-}
-
-const SN = 8
-const snakeShow = s => {
-  let out = ''
-  for (let y = 0; y < SN; y++) {
-    for (let x = 0; x < SN; x++) out += s.snake.some(([a, b]) => a === x && b === y) ? (s.snake[0][0] === x && s.snake[0][1] === y ? '🟢' : '🟩') : (s.food[0] === x && s.food[1] === y ? '🍎' : '⬛')
-    out += '\n'
-  }
-  return out + `Score: ${s.score}\nMove: .snake w/a/s/d`
-}
-
-// ───────── command categories (drives the menu) ─────────
-const CATS = {
-  'AI': ['analyze', 'blackbox', 'cat', 'chatbot', 'chatgpt', 'claudeai', 'deepseek', 'gemini', 'gpt', 'grok', 'kimi', 'llama', 'metai', 'mistral', 'perplexity', 'qwen', 'story', 'summarize', 'translate2'],
-  'ANIME': ['anime', 'cuddle', 'hug', 'kiss', 'neko', 'pat', 'slap', 'waifu', 'wink'],
-  'AUDIO': ['bassboost', 'deep', 'echo', 'fast', 'nightcore', 'reverse', 'robot', 'slow', 'toaudio', 'tomp3', 'toptt'],
-  'DOWNLOAD': ['apk', 'facebook', 'instagram', 'mediafire', 'song', 'spotify', 'tiktok', 'twitter', 'ytmp3', 'ytmp4', 'ytv', 'playlist'],
-  'FUN': ['8ball', 'coinflip', 'dare', 'dice', 'fact', 'joke', 'quote', 'truth', 'trivia', 'wordle'],
-  'GAMES': ['chess', 'hangman', 'memory', 'slots', 'snake', 'ttt', 'numberguess'],
-  'GROUP': ['add', 'demote', 'hidetag', 'kick', 'leave', 'link', 'mute', 'promote', 'revoke', 'setdesc', 'setname', 'tagall', 'unmute', 'warn', 'welcome'],
-  'IMAGE': ['carbon', 'jail', 'remini', 'rainbow', 'trigger', 'wanted', 'wasted', 'wallpaper'],
-  'LOGO': ['neonlogo', 'firelogo', 'goldlogo', 'silverlogo', 'rainbowlogo', 'dragonlogo', 'phoenixlogo', 'moonlogo', 'lightninglogo', 'crystallogo'],
-  'TOOLS': ['calc', 'define', 'google', 'iplookup', 'ping', 'qr', 'shorturl', 'speed', 'translate', 'uptime', 'url', 'weather', 'wiki'],
-  'OWNER': ['about', 'broadcast', 'owner', 'pair', 'repo', 'restart', 'sessionid', 'setbotname', 'setmode', 'setprefix', 'settimezone', 'shutdown'],
-  'INFO': ['alive', 'botstatus', 'platform', 'prefixinfo', 'sessioninfo', 'whoami'],
-  'SETTINGS': ['autobio', 'autoread', 'autoreact', 'autotype', 'autoviewstatus', 'setemoji', 'anticall', 'antidelete', 'antilink', 'antispam', 'antisticker'],
-  'MEDIA': ['logo', 'status', 'groupst', 'tosticker', 'toimage', 'tovideo', 'tovoice', 'tts', 'vv'],
-  'MUSIC': ['lyrics', 'shazam', 'spotify', 'musicmenu'],
-  'SPORTS': ['sportsnews', 'matches', 'standings', 'scorers']
-}
-const bar = p => { const n = Math.round(p / 10); return '█'.repeat(n) + '░'.repeat(10 - n) }
-const catBlock = (name, list) => `┏▣ ◈ *${name} MENU* ◈\n${list.map(c => `┃➽ ${c}`).join('\n')}\n┗▣`
-
-// ───────── toggles ─────────
-const toggle = (key, label) => async (sock, m, args) => {
-  const v = (args[0] || '').toLowerCase()
-  if (!['on', 'off'].includes(v)) return reply(sock, m, `Usage: .${key} on|off  (now: ${settings[key] ? 'on' : 'off'})`)
-  settings[key] = v === 'on'; save()
-  if (key === 'autobio') startBio(sock)
-  await reply(sock, m, `✅ ${label} ${v}`)
-}
-const groupToggle = (key, label) => groupCmd(async (sock, m, args) => {
-  const v = (args[0] || '').toLowerCase()
-  if (!['on', 'off'].includes(v)) return reply(sock, m, `Usage: .${key} on|off`)
-  settings[key][jidOf(m)] = v === 'on'; save()
-  await reply(sock, m, `✅ ${label} ${v} for this group`)
-})
-let bioTimer
-const startBio = sock => {
-  clearInterval(bioTimer)
-  if (!settings.autobio) return
-  const tick = () => sock.updateProfileStatus(`${botName()} | online ${fmtUp((Date.now() - START) / 1000)}`).catch(() => {})
-  tick(); bioTimer = setInterval(tick, 60000)
-}
-
-// ───────── extra helpers for the remaining commands ─────────
-const act = (action, label) => groupCmd(async (sock, m, args) => {
-  const t = targetOf(m, args)
-  if (!t) return reply(sock, m, 'Usage: reply to a user, mention them, or give their number')
-  await sock.groupParticipantsUpdate(jidOf(m), [t], action)
-  await reply(sock, m, `✅ ${label}`)
-})
-const everyone = async (sock, m, text, meta) =>
-  sock.sendMessage(jidOf(m), { text, mentions: meta.participants.map(p => p.id) }, { quoted: m })
-
-const LEAGUES = { epl: 'eng.1', laliga: 'esp.1', seriea: 'ita.1', bundesliga: 'ger.1', ligue1: 'fra.1', ucl: 'uefa.champions' }
-const FD_CODES = { epl: 'PL', laliga: 'PD', seriea: 'SA', bundesliga: 'BL1', ligue1: 'FL1', ucl: 'CL' }
-const leagueKey = args => (args[0] || 'epl').toLowerCase() in LEAGUES ? (args[0] || 'epl').toLowerCase() : 'epl'
-
-const toSticker = async (sock, m) => {
-  const md = await getMedia(sock, m)
-  if (!md || !/image|video|sticker/i.test(md.type)) return reply(sock, m, '❌ Reply to an image/video/gif')
-  const vf = 'scale=512:512:force_original_aspect_ratio=decrease,format=rgba,pad=512:512:-1:-1:color=0x00000000'
-  const out = /video/i.test(md.type)
-    ? await ff(md.buf, `-t 6 -an -vf "fps=12,${vf}" -vcodec libwebp -loop 0`, 'webp')
-    : await ff(md.buf, `-vf "${vf}" -vcodec libwebp`, 'webp')
-  await sock.sendMessage(jidOf(m), { sticker: out }, { quoted: m })
-}
-
-// ───────── the commands ─────────
+// ───────── the 50 commands ─────────
 const commands = {
-  // core (existing)
-  ping: async (sock, m) => reply(sock, m, 'Pong! 🏓'),
-  time: async (sock, m) => reply(sock, m, `🕒 ${new Date().toLocaleString('en-GB', { timeZone: settings.tz })}`),
-  echo: async (sock, m, args) => {
-    const md = await getMedia(sock, m).catch(() => null)
-    if (md && /audio/.test(md.type)) return fx('aecho=0.8:0.9:1000:0.3')(sock, m)
-    await reply(sock, m, args.join(' ') || 'Usage: .echo <text> (or reply to audio for echo effect)')
+  // ── core / info (8) ──
+  ping: async (sock, m) => {
+    const ms = Math.max(0, Date.now() - Number(m.messageTimestamp || 0) * 1000)
+    await reply(sock, m, `Pong! 🏓 ${ms} ms`)
   },
-  owner: async (sock, m) => reply(sock, m, [`┌─ ${botName()} OWNER ─`, `│ • Developer : ${DEV_NAME}`, `│ • Number    : +${DEV_NUMBER}`, `│ • Chat      : wa.me/${DEV_NUMBER}`, '└─'].join('\n')),
-
-  // menu
+  time: async (sock, m) => reply(sock, m, `🕒 ${new Date().toLocaleString('en-GB', { timeZone: settings.tz })}`),
+  uptime: async (sock, m) => reply(sock, m, `⏱️ Uptime: ${fmtUp((Date.now() - START) / 1000)}`),
+  alive: async (sock, m) => reply(sock, m, `✅ ${botName()} is alive and running.\nVersion: ${VERSION}\nUptime: ${fmtUp((Date.now() - START) / 1000)}`),
+  owner: async (sock, m) => reply(sock, m, [
+    `┌─ ${botName()} OWNER ─`,
+    `│ • Developer : ${DEV_NAME}`,
+    `│ • Number    : +${DEV_NUMBER}`,
+    `│ • Chat      : wa.me/${DEV_NUMBER}`,
+    '└─'
+  ].join('\n')),
+  botstatus: async (sock, m) => {
+    const tm = os.totalmem()
+    const used = Math.round((tm - os.freemem()) / 1048576)
+    await reply(sock, m, [
+      `🤖 *${botName()} status*`,
+      `Mode: ${settings.mode}`,
+      `Prefix: ${settings.prefix}`,
+      `Timezone: ${settings.tz}`,
+      `Platform: ${process.env.RENDER ? 'Render' : os.platform()}`,
+      `Node: ${process.version}`,
+      `RAM: ${used} MB / ${Math.round(tm / 1048576)} MB`,
+      `Uptime: ${fmtUp((Date.now() - START) / 1000)}`
+    ].join('\n'))
+  },
+  whoami: async (sock, m) => {
+    const s = senderOf(m)
+    await reply(sock, m, `👤 You are @${s.split('@')[0].split(':')[0]}\nOwner: ${isOwner(m) ? 'yes' : 'no'}`, { mentions: [s] })
+  },
   menu: async (sock, m) => {
-    const total = Object.values(commandsRef).length
-    const mem = process.memoryUsage().rss, tm = os.totalmem(), pct = Math.round(((tm - os.freemem()) / tm) * 100)
-    const speed = Math.max(0, Date.now() - Number(m.messageTimestamp || 0) * 1000)
-    const host = process.env.RENDER ? 'Render' : process.env.DYNO ? 'Heroku' : os.platform()
+    const p = settings.prefix
+    const body = Object.entries(CATS)
+      .map(([n, l]) => `┏▣ ◈ *${n}* ◈\n${l.map(c => `┃➽ ${p}${c}`).join('\n')}\n┗▣`)
+      .join('\n\n')
     const head = [
       `┏▣ ◈ *${botName()}* ◈`,
-      `┃ *ᴏᴡɴᴇʀ* : ${DEV_NAME}`, `┃ *ᴘʀᴇғɪx* : [ ${settings.prefix} ]`, `┃ *ʜᴏsᴛ* : ${host}`,
-      `┃ *ᴘʟᴜɢɪɴs* : ${total}`, `┃ *ᴍᴏᴅᴇ* : ${settings.mode}`, `┃ *ᴠᴇʀsɪᴏɴ* : ${VERSION}`,
-      `┃ *sᴘᴇᴇᴅ* : ${speed} ms`, `┃ *ᴜsᴀɢᴇ* : ${Math.round(mem / 1048576)} MB of ${Math.round(tm / 1073741824)} GB`,
-      `┃ *ʀᴀᴍ* : [${bar(pct)}] ${pct}%`, `┃ *ᴜᴘᴛɪᴍᴇ* : ${fmtUp((Date.now() - START) / 1000)}`, '┗▣'
+      `┃ *OWNER* : ${DEV_NAME}`,
+      `┃ *PREFIX* : [ ${p} ]`,
+      `┃ *MODE* : ${settings.mode}`,
+      `┃ *COMMANDS* : ${Object.keys(commands).length}`,
+      `┃ *VERSION* : ${VERSION}`,
+      `┃ *UPTIME* : ${fmtUp((Date.now() - START) / 1000)}`,
+      '┗▣'
     ].join('\n')
-    const body = Object.entries(CATS).map(([n, l]) => catBlock(n, l)).join('\n\n')
-    await reply(sock, m, `${head}\n\n${body}\n\n◈ ♔ OWNER : ${DEV_NAME}\n◈ ◇ POWERED BY ${botName()} ◇`)
+    await reply(sock, m, `${head}\n\n${body}\n\n◈ POWERED BY ${botName()} ◈`)
   },
 
-  // ── AI ──
-  analyze: mkAI('openai', 'Analyze the given text or topic: key points, tone, strengths, weaknesses. Be concise.'),
-  blackbox: mkAI('openai', 'You are a coding assistant. Give working code with short explanations.'),
-  cat: mkAI('openai', 'You are a playful cat. Answer helpfully but sprinkle in meows and cat puns.'),
-  chatbot: mkAI('openai', 'You are a friendly chatbot. Chat casually and briefly.'),
-  chatgpt: mkAI('openai'), gpt: mkAI('openai'),
-  claudeai: mkAI('openai'), gemini: mkAI('openai'), grok: mkAI('openai', 'You are witty and direct. Answer concisely with a little humor.'),
-  kimi: mkAI('openai'), metai: mkAI('llama'), perplexity: mkAI('openai', 'Answer like a research assistant: direct answer first, then key facts.'),
-  deepseek: mkAI('deepseek'), llama: mkAI('llama'), mistral: mkAI('mistral'), qwen: mkAI('qwen-coder'),
+  // ── owner (5) ──
+  setprefix: ownerCmd(async (sock, m, args) => {
+    const v = args[0]
+    if (!v || v.length > 3) return reply(sock, m, 'Usage: .setprefix <symbol> (max 3 chars)')
+    settings.prefix = v; save()
+    await reply(sock, m, `✅ Prefix set to ${v}`)
+  }),
+  setmode: ownerCmd(async (sock, m, args) => {
+    const v = (args[0] || '').toLowerCase()
+    if (!['public', 'private'].includes(v)) return reply(sock, m, `Usage: .setmode public|private (now: ${settings.mode})`)
+    settings.mode = v; save()
+    await reply(sock, m, `✅ Mode set to ${v}`)
+  }),
+  setbotname: ownerCmd(async (sock, m, args) => {
+    const v = args.join(' ').trim()
+    if (!v) return reply(sock, m, 'Usage: .setbotname <name>')
+    settings.botName = v; save()
+    await reply(sock, m, `✅ Bot name set to ${v}`)
+  }),
+  settimezone: ownerCmd(async (sock, m, args) => {
+    const v = args[0]
+    if (!v) return reply(sock, m, 'Usage: .settimezone Africa/Nairobi')
+    try { new Date().toLocaleString('en-GB', { timeZone: v }) } catch { return reply(sock, m, '❌ Invalid timezone') }
+    settings.tz = v; save()
+    await reply(sock, m, `✅ Timezone set to ${v}`)
+  }),
+  restart: ownerCmd(async (sock, m) => {
+    await reply(sock, m, '♻️ Restarting...')
+    setTimeout(() => process.exit(0), 1500)
+  }),
+
+  // ── fun (8) ──
+  '8ball': async (sock, m, args) => reply(sock, m, args.length ? `🎱 ${rnd(EIGHT)}` : 'Usage: .8ball <question>'),
+  coinflip: async (sock, m) => reply(sock, m, rnd(['🪙 Heads', '🪙 Tails'])),
+  dice: async (sock, m) => reply(sock, m, `🎲 You rolled a ${Math.floor(Math.random() * 6) + 1}`),
+  dare: async (sock, m) => reply(sock, m, `😈 Dare: ${rnd(DARES)}`),
+  truth: async (sock, m) => reply(sock, m, `🤔 Truth: ${rnd(TRUTHS)}`),
+  joke: async (sock, m) => {
+    const j = await getJSON('https://official-joke-api.appspot.com/random_joke')
+    await reply(sock, m, `😂 ${j.setup}\n\n${j.punchline}`)
+  },
+  fact: async (sock, m) => {
+    const j = await getJSON('https://uselessfacts.jsph.pl/api/v2/facts/random?language=en')
+    await reply(sock, m, `💡 ${j.text}`)
+  },
+  quote: async (sock, m) => {
+    const [q] = await getJSON('https://zenquotes.io/api/random')
+    await reply(sock, m, `💬 "${q.q}"\n— ${q.a}`)
+  },
+
+  // ── AI (5) ──
+  gpt: mkAI('openai'),
+  deepseek: mkAI('deepseek'),
   story: mkAI('openai', 'Write a short, engaging story (under 250 words) about the given idea.'),
   summarize: mkAI('openai', 'Summarize the given text in a few short bullet points.'),
   translate2: async (sock, m, args) => {
@@ -318,29 +247,183 @@ const commands = {
     await reply(sock, m, await ai(q, `Translate the user's text to ${lang}. Reply with the translation only.`))
   },
 
-  // ── anime ──
-  anime: anime('waifu'), cuddle: anime('cuddle'), hug: anime('hug'), kiss: anime('kiss'), neko: anime('neko'),
-  pat: anime('pat'), slap: anime('slap'), waifu: anime('waifu'), wink: anime('wink'),
+  // ── tools (7) ──
+  calc: async (sock, m, args) => {
+    const expr = args.join(' ').replace(/\^/g, '**')
+    if (!expr || !/^[\d+\-*/().%\s*]+$/.test(expr)) return reply(sock, m, 'Usage: .calc 12*(3+4)  (numbers and + - * / % ^ ( ) only)')
+    let out
+    try { out = Function(`"use strict"; return (${expr})`)() } catch { return reply(sock, m, '❌ Invalid expression') }
+    await reply(sock, m, `🧮 ${expr} = ${out}`)
+  },
+  weather: async (sock, m, args) => {
+    const city = args.join(' ')
+    if (!city) return reply(sock, m, 'Usage: .weather <city>')
+    await reply(sock, m, `🌤️ ${(await getText(`https://wttr.in/${encodeURIComponent(city)}?format=3`)).trim()}`)
+  },
+  define: async (sock, m, args) => {
+    const w = args[0]
+    if (!w) return reply(sock, m, 'Usage: .define <word>')
+    const j = await getJSON(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(w)}`).catch(() => null)
+    const d = j?.[0]?.meanings?.[0]
+    if (!d) return reply(sock, m, '❌ No definition found')
+    await reply(sock, m, `📖 *${w}* (${d.partOfSpeech})\n${d.definitions[0].definition}`)
+  },
+  wiki: async (sock, m, args) => {
+    const q = args.join(' ')
+    if (!q) return reply(sock, m, 'Usage: .wiki <topic>')
+    const j = await getJSON(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(q)}`).catch(() => null)
+    if (!j?.extract) return reply(sock, m, '❌ Nothing found')
+    await reply(sock, m, `📚 *${j.title}*\n\n${j.extract}`)
+  },
+  qr: async (sock, m, args) => {
+    const t = inputOf(m, args)
+    if (!t) return reply(sock, m, 'Usage: .qr <text or link>')
+    await sendImg(sock, m, `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(t)}`, 'QR code')
+  },
+  shorturl: async (sock, m, args) => {
+    const u = args[0]
+    if (!/^https?:\/\//i.test(u || '')) return reply(sock, m, 'Usage: .shorturl https://example.com')
+    const j = await getJSON(`https://is.gd/create.php?format=json&url=${encodeURIComponent(u)}`)
+    await reply(sock, m, j.shorturl ? `🔗 ${j.shorturl}` : `❌ ${j.errormessage || 'Failed'}`)
+  },
+  iplookup: async (sock, m, args) => {
+    const ip = args[0]
+    if (!ip) return reply(sock, m, 'Usage: .iplookup <ip>')
+    const j = await getJSON(`https://ipwho.is/${encodeURIComponent(ip)}`)
+    if (!j.success) return reply(sock, m, '❌ Lookup failed')
+    await reply(sock, m, `🌐 ${j.ip}\nCountry: ${j.country}\nRegion: ${j.region}\nCity: ${j.city}\nISP: ${j.connection?.isp || 'n/a'}`)
+  },
 
-  // ── audio ──
-  bassboost: fx('bass=g=20,dynaudnorm'), deep: fx('asetrate=44100*0.75,aresample=44100'),
-  fast: fx('atempo=1.5'), slow: fx('atempo=0.7'), nightcore: fx('asetrate=44100*1.25,aresample=44100'),
-  reverse: fx('areverse'), robot: fx("afftfilt=real='hypot(re,im)*sin(0)':imag='hypot(re,im)*cos(0)':win_size=512:overlap=0.75"),
-  toaudio: toMp3, tomp3: toMp3, toptt: ptt,
+  // ── group (9) ──
+  tagall: groupCmd(async (sock, m, args, meta) => {
+    const note = args.join(' ') || 'Attention everyone!'
+    const list = meta.participants.map(p => `@${p.id.split('@')[0]}`).join(' ')
+    await sock.sendMessage(jidOf(m), { text: `📢 ${note}\n\n${list}`, mentions: meta.participants.map(p => p.id) }, { quoted: m })
+  }),
+  hidetag: groupCmd(async (sock, m, args, meta) => {
+    const text = inputOf(m, args) || ''
+    await sock.sendMessage(jidOf(m), { text, mentions: meta.participants.map(p => p.id) }, { quoted: m })
+  }),
+  kick: groupCmd(async (sock, m, args) => {
+    const t = targetOf(m, args)
+    if (!t) return reply(sock, m, 'Usage: reply to a user, mention them, or give their number')
+    await sock.groupParticipantsUpdate(jidOf(m), [t], 'remove')
+    await reply(sock, m, '✅ Removed')
+  }),
+  add: groupCmd(async (sock, m, args) => {
+    const num = (args[0] || '').replace(/\D/g, '')
+    if (!num) return reply(sock, m, 'Usage: .add 2547xxxxxxxx')
+    await sock.groupParticipantsUpdate(jidOf(m), [num + '@s.whatsapp.net'], 'add')
+    await reply(sock, m, '✅ Add request sent')
+  }),
+  promote: groupCmd(async (sock, m, args) => {
+    const t = targetOf(m, args)
+    if (!t) return reply(sock, m, 'Usage: reply to a user, mention them, or give their number')
+    await sock.groupParticipantsUpdate(jidOf(m), [t], 'promote')
+    await reply(sock, m, '✅ Promoted to admin')
+  }),
+  demote: groupCmd(async (sock, m, args) => {
+    const t = targetOf(m, args)
+    if (!t) return reply(sock, m, 'Usage: reply to a user, mention them, or give their number')
+    await sock.groupParticipantsUpdate(jidOf(m), [t], 'demote')
+    await reply(sock, m, '✅ Demoted')
+  }),
+  link: groupCmd(async (sock, m) => {
+    await reply(sock, m, `🔗 https://chat.whatsapp.com/${await sock.groupInviteCode(jidOf(m))}`)
+  }),
+  setname: groupCmd(async (sock, m, args) => {
+    const v = args.join(' ').trim()
+    if (!v) return reply(sock, m, 'Usage: .setname <new group name>')
+    await sock.groupUpdateSubject(jidOf(m), v)
+    await reply(sock, m, '✅ Group name updated')
+  }),
+  setdesc: groupCmd(async (sock, m, args) => {
+    const v = args.join(' ').trim()
+    if (!v) return reply(sock, m, 'Usage: .setdesc <new description>')
+    await sock.groupUpdateDescription(jidOf(m), v)
+    await reply(sock, m, '✅ Group description updated')
+  }),
 
-  // ── downloads ──
-  apk: dl('apk', 'doc'), facebook: dl('facebook'), instagram: dl('instagram'), mediafire: dl('mediafire', 'doc'),
-  song: dl('song', 'audio'), spotify: dl('spotify', 'audio'), tiktok: dl('tiktok'), twitter: dl('twitter'),
-  ytmp3: dl('ytmp3', 'audio'), ytmp4: dl('ytmp4'), ytv: dl('ytv'), playlist: dl('playlist', 'list'),
+  // ── media (3) ──
+  tosticker: async (sock, m) => {
+    const md = await getMedia(sock, m)
+    if (!md || !/image|video|sticker/i.test(md.type)) return reply(sock, m, '❌ Reply to an image/video/gif')
+    const vf = 'scale=512:512:force_original_aspect_ratio=decrease,format=rgba,pad=512:512:-1:-1:color=0x00000000'
+    const out = /video/i.test(md.type)
+      ? await ff(md.buf, `-t 6 -an -vf "fps=12,${vf}" -vcodec libwebp -loop 0`, 'webp')
+      : await ff(md.buf, `-vf "${vf}" -vcodec libwebp`, 'webp')
+    await sock.sendMessage(jidOf(m), { sticker: out }, { quoted: m })
+  },
+  tts: async (sock, m, args) => {
+    const t = inputOf(m, args).slice(0, 200)
+    if (!t) return reply(sock, m, 'Usage: .tts <text>')
+    const buf = await getBuf(`https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=en&q=${encodeURIComponent(t)}`)
+    await sock.sendMessage(jidOf(m), { audio: buf, mimetype: 'audio/mpeg' }, { quoted: m })
+  },
+  vv: async (sock, m) => {
+    const md = await getMedia(sock, m)
+    if (!md) return reply(sock, m, '❌ Reply to a view-once photo or video')
+    const msg = /video/i.test(md.type) ? { video: md.buf } : { image: md.buf }
+    await sock.sendMessage(jidOf(m), msg, { quoted: m })
+  },
 
-  // ── fun ──
-  '8ball': async (sock, m, args) => reply(sock, m, args.length ? `🎱 ${rnd(EIGHT)}` : 'Usage: .8ball <question>'),
-  coinflip: async (sock, m) => reply(sock, m, rnd(['🪙 Heads', '🪙 Tails'])),
-  flip: async (sock, m) => reply(sock, m, rnd(['🪙 Heads', '🪙 Tails'])),
-  dare: async (sock, m) => reply(sock, m, `😈 Dare: ${rnd(DARES)}`),
-  truth: async (sock, m) => reply(sock, m, `🤔 Truth: ${rnd(TRUTHS)}`),
-  dice: async (sock, m) => reply(sock, m, `🎲 You rolled a ${Math.floor(Math.random() * 6) + 1}`),
-  fact: async (sock, m) => reply(sock, m, `💡 ${(await getJSON('https://uselessfacts.jsph.pl/api/v2/facts/random?language=en')).text}`),
-  joke: async (sock, m) => { const j = await getJSON('https://official-joke-api.appspot.com/random_joke'); await reply(sock, m, `😂 ${j.setup}\n\n${j.punchline}`) },
-  quote: async (sock, m) => { const [q] = await getJSON('https://zenquotes.io/api/random'); await reply(sock, m, `💬 "${q.q}"\n— ${q.a}`) },
-  trivia: a
+  // ── games (2) ──
+  numberguess: async (sock, m, args) => {
+    const jid = jidOf(m)
+    const g = GUESS.get(jid)
+    const n = parseInt(args[0], 10)
+    if (!g || args[0] === 'new') {
+      GUESS.set(jid, { n: Math.floor(Math.random() * 100) + 1, tries: 0 })
+      return reply(sock, m, '🔢 I picked a number from 1 to 100. Guess with .numberguess <number>')
+    }
+    if (Number.isNaN(n)) return reply(sock, m, 'Usage: .numberguess <number>  (or .numberguess new)')
+    g.tries++
+    if (n === g.n) { GUESS.delete(jid); return reply(sock, m, `🎉 Correct! It was ${n}. Tries: ${g.tries}`) }
+    await reply(sock, m, n < g.n ? '⬆️ Higher' : '⬇️ Lower')
+  },
+  slots: async (sock, m) => {
+    const S = ['🍒', '🍋', '🍇', '🍉', '⭐', '7️⃣']
+    const r = [rnd(S), rnd(S), rnd(S)]
+    const win = r[0] === r[1] && r[1] === r[2]
+    await reply(sock, m, `🎰 ${r.join(' | ')}\n${win ? '🎉 JACKPOT!' : 'No luck, try again.'}`)
+  },
+
+  // ── anime (3) ──
+  neko: async (sock, m) => anime('neko')(sock, m),
+  waifu: async (sock, m) => anime('waifu')(sock, m),
+  hug: async (sock, m) => anime('hug')(sock, m)
+}
+
+// ───────── categories (drive the menu) ─────────
+const CATS = {
+  INFO: ['ping', 'time', 'uptime', 'alive', 'owner', 'botstatus', 'whoami', 'menu'],
+  OWNER: ['setprefix', 'setmode', 'setbotname', 'settimezone', 'restart'],
+  FUN: ['8ball', 'coinflip', 'dice', 'dare', 'truth', 'joke', 'fact', 'quote'],
+  AI: ['gpt', 'deepseek', 'story', 'summarize', 'translate2'],
+  TOOLS: ['calc', 'weather', 'define', 'wiki', 'qr', 'shorturl', 'iplookup'],
+  GROUP: ['tagall', 'hidetag', 'kick', 'add', 'promote', 'demote', 'link', 'setname', 'setdesc'],
+  MEDIA: ['tosticker', 'tts', 'vv'],
+  GAMES: ['numberguess', 'slots'],
+  ANIME: ['neko', 'waifu', 'hug']
+}
+
+// ───────── dispatcher ─────────
+export const handleCommand = async (sock, m) => {
+  const body = textOf(m).trim()
+  if (!body.startsWith(settings.prefix)) return false
+  const [name, ...args] = body.slice(settings.prefix.length).trim().split(/\s+/)
+  const fn = commands[(name || '').toLowerCase()]
+  if (!fn) return false
+  if (settings.mode === 'private' && !isOwner(m)) return false
+  try {
+    await fn(sock, m, args)
+  } catch (e) {
+    console.error(`[command:${name}]`, e)
+    await reply(sock, m, `❌ ${name} failed: ${e.message || e}`).catch(() => {})
+  }
+  return true
+}
+
+export { commands }
+export default handleCommand
+  
