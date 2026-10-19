@@ -8,10 +8,9 @@ import makeWASocket, {
   fetchLatestBaileysVersion
 } from '@whiskeysockets/baileys'
 import pino from 'pino'
-import { handleCommand } from './commands.js'
+import { handleCommand, settings, commands } from './commands.js'
 
 const PHONE = (process.env.PHONE_NUMBER || '').replace(/\D/g, '')
-const PREFIX = process.env.PREFIX || '.'
 const PORT = process.env.PORT || 3000
 const PAIR_KEY = process.env.PAIR_KEY || ''
 const AUTH_DIR = 'auth'
@@ -20,6 +19,7 @@ const SESSION_PREFIX = 'HACKER~'
 let sock = null
 let linked = false
 let sessionSent = false
+let welcomeSent = false
 
 // Packs every file in the auth folder into one text string
 function encodeSession() {
@@ -62,6 +62,32 @@ async function sendSessionToOwner(s) {
   }
 }
 
+// Welcome alert sent to the bot's own chat when it connects (once per start, not on every reconnect)
+async function sendWelcome(s) {
+  if (welcomeSent) return
+  welcomeSent = true
+  try {
+    const me = s.user.id.split(':')[0] + '@s.whatsapp.net'
+    const name = settings.botName || process.env.BOT_NAME || 'HACKER MD'
+    const now = new Date().toLocaleString('en-GB', { timeZone: settings.tz })
+    const text = [
+      '┏▣ ◈ *BOT CONNECTED* ◈',
+      `┃ 🤖 *${name}* is now online`,
+      `┃ 🔑 Prefix : [ ${settings.prefix} ]`,
+      `┃ 🌍 Mode : ${settings.mode}`,
+      `┃ 📦 Commands : ${Object.keys(commands).length}`,
+      `┃ 🕒 Time : ${now}`,
+      `┃ 🖥️ Host : ${process.env.RENDER ? 'Render' : process.platform}`,
+      '┗▣',
+      '',
+      `Type ${settings.prefix}menu to see all commands.`
+    ].join('\n')
+    await s.sendMessage(me, { text })
+  } catch (e) {
+    console.log('Could not send welcome message:', e.message)
+  }
+}
+
 async function start() {
   restoreSessionFromEnv()
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR)
@@ -92,6 +118,7 @@ async function start() {
       linked = true
       console.log('✅ Bot connected')
       sendSessionToOwner(s)
+      sendWelcome(s)
     }
     if (connection === 'close') {
       const code = lastDisconnect?.error?.output?.statusCode
@@ -110,9 +137,9 @@ async function start() {
     for (const m of messages) {
       if (!m.message) continue
       const text = m.message.conversation || m.message.extendedTextMessage?.text || ''
-      if (!text.startsWith(PREFIX)) continue
+      if (!text.startsWith(settings.prefix)) continue
 
-      const [name, ...args] = text.slice(PREFIX.length).trim().split(/\s+/)
+      const [name, ...args] = text.slice(settings.prefix.length).trim().split(/\s+/)
       await handleCommand(s, m, name.toLowerCase(), args)
     }
   })
@@ -152,3 +179,4 @@ app.listen(PORT, () => {
 })
 
 start()
+                                           
