@@ -17,7 +17,7 @@ const SETTINGS_FILE = './settings.json'
 export const settings = {
   prefix: '.', mode: 'public', botName: '', tz: 'Africa/Nairobi', emoji: '😎',
   autobio: false, autoread: false, autoreact: false, autotype: false, autoviewstatus: false,
-  anticall: false, antidelete: false, antilink: {}, antispam: {}, antisticker: {}, welcome: {}
+  anticall: false, antidelete: false, antilink: {}, antispam: {}, antisticker: {}, welcome: {}, warns: {}
 }
 try { Object.assign(settings, JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'))) } catch {}
 const save = () => { try { fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings)) } catch {} }
@@ -33,6 +33,7 @@ const reply = (sock, m, text, extra = {}) => sock.sendMessage(jidOf(m), { text, 
 const rnd = a => a[Math.floor(Math.random() * a.length)]
 const shuffle = a => [...a].sort(() => Math.random() - 0.5)
 const fmtUp = s => `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m ${Math.floor(s % 60)}s`
+const sleep = ms => new Promise(r => setTimeout(r, ms))
 
 const textOf = msg => {
   const x = msg?.message || msg
@@ -53,6 +54,11 @@ const getJSON = async (url, opts = {}) => {
   const r = await fetch(url, { signal: AbortSignal.timeout(25000), ...opts })
   if (!r.ok) throw new Error('HTTP ' + r.status)
   return r.json()
+}
+const getText = async url => {
+  const r = await fetch(url, { signal: AbortSignal.timeout(25000) })
+  if (!r.ok) throw new Error('HTTP ' + r.status)
+  return r.text()
 }
 const getBuf = async url => {
   const r = await fetch(url, { signal: AbortSignal.timeout(30000) })
@@ -241,6 +247,30 @@ const startBio = sock => {
   tick(); bioTimer = setInterval(tick, 60000)
 }
 
+// ───────── extra helpers for the remaining commands ─────────
+const act = (action, label) => groupCmd(async (sock, m, args) => {
+  const t = targetOf(m, args)
+  if (!t) return reply(sock, m, 'Usage: reply to a user, mention them, or give their number')
+  await sock.groupParticipantsUpdate(jidOf(m), [t], action)
+  await reply(sock, m, `✅ ${label}`)
+})
+const everyone = async (sock, m, text, meta) =>
+  sock.sendMessage(jidOf(m), { text, mentions: meta.participants.map(p => p.id) }, { quoted: m })
+
+const LEAGUES = { epl: 'eng.1', laliga: 'esp.1', seriea: 'ita.1', bundesliga: 'ger.1', ligue1: 'fra.1', ucl: 'uefa.champions' }
+const FD_CODES = { epl: 'PL', laliga: 'PD', seriea: 'SA', bundesliga: 'BL1', ligue1: 'FL1', ucl: 'CL' }
+const leagueKey = args => (args[0] || 'epl').toLowerCase() in LEAGUES ? (args[0] || 'epl').toLowerCase() : 'epl'
+
+const toSticker = async (sock, m) => {
+  const md = await getMedia(sock, m)
+  if (!md || !/image|video|sticker/i.test(md.type)) return reply(sock, m, '❌ Reply to an image/video/gif')
+  const vf = 'scale=512:512:force_original_aspect_ratio=decrease,format=rgba,pad=512:512:-1:-1:color=0x00000000'
+  const out = /video/i.test(md.type)
+    ? await ff(md.buf, `-t 6 -an -vf "fps=12,${vf}" -vcodec libwebp -loop 0`, 'webp')
+    : await ff(md.buf, `-vf "${vf}" -vcodec libwebp`, 'webp')
+  await sock.sendMessage(jidOf(m), { sticker: out }, { quoted: m })
+}
+
 // ───────── the commands ─────────
 const commands = {
   // core (existing)
@@ -313,25 +343,4 @@ const commands = {
   fact: async (sock, m) => reply(sock, m, `💡 ${(await getJSON('https://uselessfacts.jsph.pl/api/v2/facts/random?language=en')).text}`),
   joke: async (sock, m) => { const j = await getJSON('https://official-joke-api.appspot.com/random_joke'); await reply(sock, m, `😂 ${j.setup}\n\n${j.punchline}`) },
   quote: async (sock, m) => { const [q] = await getJSON('https://zenquotes.io/api/random'); await reply(sock, m, `💬 "${q.q}"\n— ${q.a}`) },
-  trivia: async (sock, m, args) => {
-    const jid = jidOf(m), cur = G.trivia.get(jid), a = (args[0] || '').toLowerCase()
-    if (cur && 'abcd'.includes(a) && a) {
-      G.trivia.delete(jid)
-      return reply(sock, m, cur.ans === a ? '✅ Correct!' : `❌ Wrong. Answer: ${cur.ans.toUpperCase()}) ${cur.text}`)
-    }
-    const { results: [q] } = await getJSON('https://opentdb.com/api.php?amount=1&type=multiple&encode=url3986')
-    const d = s => decodeURIComponent(s)
-    const opts = shuffle([q.correct_answer, ...q.incorrect_answers].map(d))
-    G.trivia.set(jid, { ans: 'abcd'[opts.indexOf(d(q.correct_answer))], text: d(q.correct_answer) })
-    await reply(sock, m, `🧠 ${d(q.question)}\n\n${opts.map((o, i) => `${'ABCD'[i]}) ${o}`).join('\n')}\n\nAnswer with .trivia a/b/c/d`)
-  },
-  wordle: async (sock, m, args) => {
-    const jid = jidOf(m), g = args[0]?.toLowerCase()
-    let s = G.wordle.get(jid)
-    if (!s || !g) { s = { word: rnd(W5), tries: [] }; G.wordle.set(jid, s); if (!g) return reply(sock, m, '🟩 Wordle started! Guess a 5-letter word: .wordle crane') }
-    if (g.length !== 5) return reply(sock, m, '❌ Use a 5-letter word')
-    const res = [...g].map((c, i) => c === s.word[i] ? '🟩' : s.word.includes(c) ? '🟨' : '⬛').join('')
-    s.tries.push(`${res} ${g.toUpperCase()}`)
-    if (g === s.word) { G.wordle.delete(jid); return reply(sock, m, `${s.tries.join('\n')}\n\n🎉 Solved in ${s.tries.length}!`) }
-    if (s.tries.length >= 6) { G.wordle.delete(jid); return reply(sock, m, `${s.tries.join('\n')}\n\n😢 It was ${s.word.toUpperCase()}`) }
-    await reply(sock, m, `${s.tries.join('\n')}\n\n${6 - s.tries.length} tries left`
+  trivia: a
