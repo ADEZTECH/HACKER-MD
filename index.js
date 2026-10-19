@@ -10,11 +10,30 @@ import makeWASocket, {
 import pino from 'pino'
 import { handleCommand, settings, commands } from './commands.js'
 
+// libsignal prints whole session objects (including private ratchet keys) via console.info/warn.
+// Drop those lines so they never reach the Render logs.
+const SIGNAL_NOISE = /^(Closing session|Opening session|Removing old closed session|Migrating session|Session already (closed|open)|Closing open session)/
+for (const level of ['info', 'warn', 'log']) {
+  const orig = console[level].bind(console)
+  console[level] = (...a) => {
+    if (typeof a[0] === 'string' && SIGNAL_NOISE.test(a[0])) return
+    orig(...a)
+  }
+}
+
 const PHONE = (process.env.PHONE_NUMBER || '').replace(/\D/g, '')
 const PORT = process.env.PORT || 3000
 const PAIR_KEY = process.env.PAIR_KEY || ''
 const AUTH_DIR = 'auth'
 const SESSION_PREFIX = 'HACKER~'
+
+// small in-memory cache of recent messages, used by getMessage
+const sentCache = new Map()
+const rememberMsg = (m) => {
+  if (!m?.key?.id || !m.message) return
+  sentCache.set(m.key.id, m)
+  if (sentCache.size > 500) sentCache.delete(sentCache.keys().next().value)
+}
 
 let sock = null
 let linked = false
@@ -97,9 +116,22 @@ async function start() {
     version,
     auth: state,
     logger: pino({ level: 'silent' }),
-    browser: ['Ubuntu', 'Chrome', '20.0.04']
+    browser: ['Ubuntu', 'Chrome', '20.0.04'],
+    markOnlineOnConnect: false,
+    syncFullHistory: false,
+    // Lets WhatsApp re-request a message the phone could not decrypt ("Waiting for this message")
+    getMessage: async (key) => sentCache.get(key.id)?.message || undefined
   })
   sock = s
+
+  // Remember every message we send or receive so retries can be answered
+  const rawSend = s.sendMessage.bind(s)
+  s.sendMessage = async (...a) => {
+    const sent = await rawSend(...a)
+    if (sent?.key?.id) rememberMsg(sent)
+    return sent
+  }
+  s.ev.on('messages.upsert', ({ messages }) => messages.forEach(rememberMsg))
   linked = !!s.authState.creds.registered
 
   s.ev.on('creds.update', saveCreds)
@@ -179,4 +211,4 @@ app.listen(PORT, () => {
 })
 
 start()
-                                           
+        
