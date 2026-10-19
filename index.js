@@ -1,6 +1,7 @@
 import 'dotenv/config'
 import fs from 'fs'
 import path from 'path'
+import express from 'express'
 import makeWASocket, {
   useMultiFileAuthState,
   DisconnectReason,
@@ -11,8 +12,13 @@ import { handleCommand } from './commands.js'
 
 const PHONE = (process.env.PHONE_NUMBER || '').replace(/\D/g, '')
 const PREFIX = process.env.PREFIX || '.'
+const PORT = process.env.PORT || 3000
+const PAIR_KEY = process.env.PAIR_KEY || '' // optional: set it to stop strangers using the page
 const AUTH_DIR = 'auth'
 const SESSION_PREFIX = 'HACKER~'
+
+let sock = null
+let linked = false
 
 // Packs every file in the auth folder into one text string
 function encodeSession() {
@@ -38,14 +44,14 @@ function restoreSessionFromEnv() {
 
 let sessionSent = false
 
-async function sendSessionToOwner(sock) {
+async function sendSessionToOwner(s) {
   if (sessionSent) return
   sessionSent = true
   const sid = encodeSession()
   console.log('\n===== SESSION ID (keep private) =====\n' + sid + '\n=====================================\n')
   try {
-    const me = sock.user.id.split(':')[0] + '@s.whatsapp.net'
-    await sock.sendMessage(me, {
+    const me = s.user.id.split(':')[0] + '@s.whatsapp.net'
+    await s.sendMessage(me, {
       document: Buffer.from(sid),
       fileName: 'session.txt',
       mimetype: 'text/plain',
@@ -61,35 +67,36 @@ async function start() {
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR)
   const { version } = await fetchLatestBaileysVersion()
 
-  const sock = makeWASocket({
+  const s = makeWASocket({
     version,
     auth: state,
     logger: pino({ level: 'silent' }),
     browser: ['Ubuntu', 'Chrome', '20.0.04']
   })
+  sock = s
+  linked = !!s.authState.creds.registered
 
-  sock.ev.on('creds.update', saveCreds)
+  s.ev.on('creds.update', saveCreds)
 
-  // First run without a session: ask WhatsApp for a pairing code
-  if (!sock.authState.creds.registered) {
-    if (!PHONE) {
-      console.log('Set PHONE_NUMBER in .env (country code, no + or spaces) and restart.')
-      process.exit(1)
-    }
+  // If PHONE_NUMBER is set and this login is new, request the code automatically
+  if (!s.authState.creds.registered && PHONE) {
     await new Promise((r) => setTimeout(r, 3000))
-    const code = await sock.requestPairingCode(PHONE)
+    const code = await s.requestPairingCode(PHONE)
     console.log(`Pairing code: ${code}`)
-    console.log('On the phone: WhatsApp > Linked devices > Link a device > Link with phone number instead')
+  } else if (!s.authState.creds.registered) {
+    console.log(`Not linked yet. Open the pairing page on port ${PORT} to get a code.`)
   }
 
-  sock.ev.on('connection.update', ({ connection, lastDisconnect }) => {
+  s.ev.on('connection.update', ({ connection, lastDisconnect }) => {
     if (connection === 'open') {
+      linked = true
       console.log('✅ Bot connected')
-      sendSessionToOwner(sock)
+      sendSessionToOwner(s)
     }
     if (connection === 'close') {
       const code = lastDisconnect?.error?.output?.statusCode
       if (code === DisconnectReason.loggedOut) {
+        linked = false
         console.log('Logged out. Remove SESSION_ID / delete the auth folder and restart to pair again.')
       } else {
         console.log('Connection closed, reconnecting...')
@@ -98,7 +105,7 @@ async function start() {
     }
   })
 
-  sock.ev.on('messages.upsert', async ({ messages, type }) => {
+  s.ev.on('messages.upsert', async ({ messages, type }) => {
     if (type !== 'notify') return
     for (const m of messages) {
       if (!m.message) continue
@@ -106,9 +113,42 @@ async function start() {
       if (!text.startsWith(PREFIX)) continue
 
       const [name, ...args] = text.slice(PREFIX.length).trim().split(/\s+/)
-      await handleCommand(sock, m, name.toLowerCase(), args)
+      await handleCommand(s, m, name.toLowerCase(), args)
     }
   })
 }
+
+// ---------- Web: pairing page and API ----------
+const app = express()
+app.use(express.json())
+app.use(express.static('public'))
+
+app.get('/health', (req, res) => res.json({ status: 'ok', linked }))
+
+app.post('/api/pair', async (req, res) => {
+  try {
+    if (PAIR_KEY && req.body?.key !== PAIR_KEY) {
+      return res.status(403).json({ error: 'Wrong access key.' })
+    }
+    if (linked) {
+      return res.status(409).json({ error: 'The bot is already linked.' })
+    }
+    if (!sock) {
+      return res.status(503).json({ error: 'Bot is starting. Try again in a few seconds.' })
+    }
+    const number = String(req.body?.number || '').replace(/\D/g, '')
+    if (number.length < 8) {
+      return res.status(400).json({ error: 'Enter the number with country code, no + or spaces.' })
+    }
+    const code = await sock.requestPairingCode(number)
+    res.json({ code: String(code).replace(/(.{4})(.{4})/, '$1-$2') })
+  } catch (e) {
+    res.status(500).json({ error: 'Could not get a code: ' + e.message })
+  }
+})
+
+app.listen(PORT, () => {
+  console.log(`🌐 Web server on port ${PORT}`)
+})
 
 start()
