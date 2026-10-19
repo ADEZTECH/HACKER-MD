@@ -1,4 +1,6 @@
 const BOT_NAME = process.env.BOT_NAME || 'HACKER MD'
+const DEV_NAME = 'Arnold Adez'
+const DEV_NUMBER = '254111783552'
 
 const commands = {
   ping: async (sock, m) => {
@@ -15,13 +17,27 @@ const commands = {
     await sock.sendMessage(m.key.remoteJid, { text }, { quoted: m })
   },
 
+  owner: async (sock, m) => {
+    const text = [
+      `┌─ ${BOT_NAME} OWNER ─`,
+      `│ • Developer : ${DEV_NAME}`,
+      `│ • Number    : +${DEV_NUMBER}`,
+      `│ • Chat      : wa.me/${DEV_NUMBER}`,
+      '└─'
+    ].join('\n')
+    await sock.sendMessage(m.key.remoteJid, { text }, { quoted: m })
+  },
+
   menu: async (sock, m) => {
     const text = [
       `┌─ ${BOT_NAME} ─`,
       '│ • .ping   check the bot',
       '│ • .time   current time',
       '│ • .echo   repeat your text',
-      '└─'
+      '│ • .owner  developer contact',
+      '└─',
+      '',
+      `Developed by ${DEV_NAME} (+${DEV_NUMBER})`
     ].join('\n')
     await sock.sendMessage(m.key.remoteJid, { text }, { quoted: m })
   }
