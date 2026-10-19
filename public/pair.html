@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HACKER MD Pairing</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #0d1117; color: #e6edf3;
+           display: flex; justify-content: center; padding: 24px; margin: 0; }
+    .card { width: 100%; max-width: 420px; background: #161b22; border: 1px solid #30363d;
+            border-radius: 12px; padding: 24px; }
+    h1 { margin-top: 0; font-size: 22px; }
+    label { display: block; margin: 14px 0 6px; font-size: 14px; color: #8b949e; }
+    input { width: 100%; box-sizing: border-box; padding: 12px; border-radius: 8px;
+            border: 1px solid #30363d; background: #0d1117; color: #e6edf3; font-size: 16px; }
+    button { margin-top: 18px; width: 100%; padding: 12px; border: 0; border-radius: 8px;
+             background: #238636; color: #fff; font-size: 16px; cursor: pointer; }
+    button:disabled { opacity: 0.6; cursor: wait; }
+    #result { margin-top: 18px; text-align: center; }
+    .code { font-size: 32px; letter-spacing: 4px; font-weight: bold; color: #3fb950; }
+    .error { color: #f85149; }
+    ol { padding-left: 20px; line-height: 1.6; font-size: 14px; color: #8b949e; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>HACKER MD Pairing</h1>
+    <form id="form">
+      <label for="number">WhatsApp number (country code, no + or spaces)</label>
+      <input id="number" placeholder="254XXXXXXXXX" inputmode="numeric" required>
+      <label for="key">Access key (if the owner set one)</label>
+      <input id="key" type="password" placeholder="Optional">
+      <button id="btn" type="submit">Get pairing code</button>
+    </form>
+    <div id="result"></div>
+    <ol>
+      <li>On your phone, open WhatsApp.</li>
+      <li>Go to Linked devices > Link a device.</li>
+      <li>Choose Link with phone number instead.</li>
+      <li>Enter the code shown here within one minute.</li>
+    </ol>
+  </div>
+
+<script>
+  const form = document.getElementById('form')
+  const btn = document.getElementById('btn')
+  const result = document.getElementById('result')
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault()
+    btn.disabled = true
+    btn.textContent = 'Requesting...'
+    result.innerHTML = ''
+    try {
+      const res = await fetch('/api/pair', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          number: document.getElementById('number').value,
+          key: document.getElementById('key').value
+        })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Something went wrong')
+      result.innerHTML = '<div class="code"></div>'
+      result.querySelector('.code').textContent = data.code
+    } catch (err) {
+      result.innerHTML = '<div class="error"></div>'
+      result.querySelector('.error').textContent = err.message
+    } finally {
+      btn.disabled = false
+      btn.textContent = 'Get pairing code'
+    }
+  })
+</script>
+</body>
+</html>
