@@ -13,12 +13,13 @@ import { handleCommand } from './commands.js'
 const PHONE = (process.env.PHONE_NUMBER || '').replace(/\D/g, '')
 const PREFIX = process.env.PREFIX || '.'
 const PORT = process.env.PORT || 3000
-const PAIR_KEY = process.env.PAIR_KEY || '' // optional: set it to stop strangers using the page
+const PAIR_KEY = process.env.PAIR_KEY || ''
 const AUTH_DIR = 'auth'
 const SESSION_PREFIX = 'HACKER~'
 
 let sock = null
 let linked = false
+let sessionSent = false
 
 // Packs every file in the auth folder into one text string
 function encodeSession() {
@@ -42,8 +43,7 @@ function restoreSessionFromEnv() {
   console.log('✅ Session restored from SESSION_ID')
 }
 
-let sessionSent = false
-
+// Logs the session ID and sends it to the bot's own WhatsApp chat (once per start)
 async function sendSessionToOwner(s) {
   if (sessionSent) return
   sessionSent = true
@@ -97,7 +97,7 @@ async function start() {
       const code = lastDisconnect?.error?.output?.statusCode
       if (code === DisconnectReason.loggedOut) {
         linked = false
-        console.log('Logged out. Remove SESSION_ID / delete the auth folder and restart to pair again.')
+        console.log('Logged out. Remove SESSION_ID and restart to pair again.')
       } else {
         console.log('Connection closed, reconnecting...')
         start()
